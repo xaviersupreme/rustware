@@ -107,6 +107,8 @@ local TeleportsTab: any = Interface.Window:MakeTab({ Name = "Teleports", Icon = 
 local ClassesTab: any = Interface.Window:MakeTab({ Name = "Classes", Icon = "rbxassetid://7743876054", PremiumOnly = false });
 local MiscTab: any = Interface.Window:MakeTab({ Name = "Misc", Icon = "rbxassetid://8997386997", PremiumOnly = false });
 
+MainTab:AddSection({ Name = "Automation" });
+
 local SpamOxygenEnabled: boolean = false;
 MainTab:AddToggle({
     Name = "spam oxygen",
@@ -126,6 +128,37 @@ MainTab:AddToggle({
                     task.wait(0.01); 
                 end
             end); 
+        end
+    end
+});
+
+local AutoThrottleEnabled: boolean = false;
+MainTab:AddToggle({
+    Name = "auto throttle",
+    Default = false,
+    Callback = function(Value: boolean)
+        AutoThrottleEnabled = Value;
+        if (Value) then
+            task.spawn(function()
+                while (AutoThrottleEnabled) do
+                    pcall(function()
+                        local Plane = Workspace:FindFirstChild("Plane");
+                        local Console = Plane and Plane:FindFirstChild("Machines") and Plane.Machines:FindFirstChild("CenterConsole");
+                        if (not Console) then return; end
+                        
+                        for _, Name: string in ipairs({"ThrottlesLow", "ThrottlesMid"}) do
+                            local Detector = Console:FindFirstChild(Name) 
+                                and Console[Name]:FindFirstChild("ClickTing") 
+                                and Console[Name].ClickTing:FindFirstChild("ClickDetector");
+                                
+                            if (Detector and Detector:IsA("ClickDetector") and Detector.MaxActivationDistance > 0) then
+                                fireclickdetector(Detector);
+                            end
+                        end
+                    end);
+                    task.wait(0.15);
+                end
+            end);
         end
     end
 });
@@ -271,6 +304,8 @@ MainTab:AddToggle({
         end
     end
 });
+
+MainTab:AddSection({ Name = "Manual Fixes" });
 
 MainTab:AddButton({
     Name = "fix lights",
