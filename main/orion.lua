@@ -1,5 +1,5 @@
 --!strict
-local OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Orion/main/source"))();
+local OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/jensonhirst/Orion/main/source"))();
 
 local Workspace: Workspace = game:GetService("Workspace");
 local Players: Players = game:GetService("Players");
