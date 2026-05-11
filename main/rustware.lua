@@ -353,19 +353,6 @@ MainTab:CreateButton({
     end
 });
 
-MainTab:CreateButton({ 
-    Name = "send flares", 
-    Callback = function()
-        local FlareEvent: RemoteEvent? = ReplicatedStorage:FindFirstChild("SteeringFlares");
-        if (FlareEvent) then 
-            FlareEvent:FireServer(); 
-            Interface:Notify("Done", "flares sent"); 
-        else 
-            Interface:Notify("Error", "not found"); 
-        end
-    end 
-});
-
 MainTab:CreateSection("Tools");
 
 MainTab:CreateButton({
