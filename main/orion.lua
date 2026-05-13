@@ -1,4 +1,3 @@
---!strict
 local OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/jensonhirst/Orion/main/source"))();
 
 local Workspace: Workspace = game:GetService("Workspace");
@@ -27,8 +26,8 @@ function CharacterController:TeleportToCFrame(TargetCFrame: CFrame): boolean
         local Character: Model? = self.Player.Character;
         if (not Character) then return; end
         local RootPart: BasePart? = Character:FindFirstChild("HumanoidRootPart") or Character:FindFirstChild("Torso") or Character:FindFirstChild("UpperTorso");
-        if (RootPart) then 
-            RootPart.CFrame = TargetCFrame + Vector3.new(0, 3, 0); 
+        if (RootPart) then
+            RootPart.CFrame = TargetCFrame + Vector3.new(0, 3, 0);
         end
     end);
     return Success;
@@ -42,7 +41,7 @@ function CharacterController:PerformRefuel(): boolean
     local Success: boolean = pcall(function()
         local Plane = Workspace:FindFirstChild("Plane");
         if (not Plane) then return; end
-        
+
         local GasCan = Plane:FindFirstChild("GrabGasCan") and Plane.GrabGasCan:FindFirstChild("GrabGasCan");
         if (GasCan) then
             self:TeleportToPart(GasCan);
@@ -50,18 +49,18 @@ function CharacterController:PerformRefuel(): boolean
             local Prompt = GasCan:FindFirstChild("GrabCan");
             if (Prompt) then fireproximityprompt(Prompt); end
         end
-        
+
         local TempPart: Part = Instance.new("Part");
         TempPart.CanCollide = false;
         TempPart.Transparency = 1;
         TempPart.Anchored = true;
         TempPart.CFrame = CFrame.new(0.628192008, 18.8988991, -86.9489975);
         TempPart.Parent = Workspace;
-        
+
         self:TeleportToPart(TempPart);
         task.wait(0.2);
         TempPart:Destroy();
-        
+
         local Generator = Plane:FindFirstChild("Machines") and Plane.Machines:FindFirstChild("Generator");
         local DumpFuel = Generator and Generator:FindFirstChild("DumpFuel");
         local FuelUpPrompt = DumpFuel and DumpFuel:FindFirstChild("FuelUp");
@@ -81,9 +80,9 @@ UiManager.__index = UiManager;
 function UiManager.new(Title: string, Version: string): UiManager
     local self = setmetatable({}, UiManager);
     self.Window = OrionLib:MakeWindow({
-        Name = Title .. " " .. Version, 
-        HidePremium = true, 
-        SaveConfig = false, 
+        Name = Title .. " " .. Version,
+        HidePremium = true,
+        SaveConfig = false,
         ConfigFolder = "rustware"
     });
     return self;
@@ -109,29 +108,6 @@ local MiscTab: any = Interface.Window:MakeTab({ Name = "Misc", Icon = "rbxasseti
 
 MainTab:AddSection({ Name = "Automation" });
 
-local SpamOxygenEnabled: boolean = false;
-MainTab:AddToggle({
-    Name = "spam oxygen",
-    Default = false,
-    Callback = function(Value: boolean)
-        SpamOxygenEnabled = Value;
-        if (Value) then 
-            task.spawn(function()
-                local AirEvent: RemoteEvent? = Workspace:FindFirstChild("Values") and Workspace.Values:FindFirstChild("RepumpAirEvent");
-                if (not AirEvent) then 
-                    Interface:Notify("Error", "event not found"); 
-                    SpamOxygenEnabled = false; 
-                    return; 
-                end
-                while (SpamOxygenEnabled) do 
-                    pcall(function() AirEvent:FireServer(); end); 
-                    task.wait(0.01); 
-                end
-            end); 
-        end
-    end
-});
-
 local AutoThrottleEnabled: boolean = false;
 MainTab:AddToggle({
     Name = "auto throttle",
@@ -145,12 +121,12 @@ MainTab:AddToggle({
                         local Plane = Workspace:FindFirstChild("Plane");
                         local Console = Plane and Plane:FindFirstChild("Machines") and Plane.Machines:FindFirstChild("CenterConsole");
                         if (not Console) then return; end
-                        
+
                         for _, Name: string in ipairs({"ThrottlesLow", "ThrottlesMid"}) do
-                            local Detector = Console:FindFirstChild(Name) 
-                                and Console[Name]:FindFirstChild("ClickTing") 
+                            local Detector = Console:FindFirstChild(Name)
+                                and Console[Name]:FindFirstChild("ClickTing")
                                 and Console[Name].ClickTing:FindFirstChild("ClickDetector");
-                                
+
                             if (Detector and Detector:IsA("ClickDetector") and Detector.MaxActivationDistance > 0) then
                                 fireclickdetector(Detector);
                             end
@@ -163,70 +139,145 @@ MainTab:AddToggle({
     end
 });
 
+local AutoFixNavEnabled: boolean = false;
+local NavConnection: RBXScriptConnection? = nil;
+
+MainTab:AddToggle({
+    Name = "auto fix nav",
+    Default = false,
+    Callback = function(Value: boolean)
+        AutoFixNavEnabled = Value;
+
+        if (NavConnection) then NavConnection:Disconnect(); NavConnection = nil; end
+        if (not Value) then return; end
+
+        pcall(function()
+            local Plane = Workspace:FindFirstChild("Plane");
+            local FixNav = Plane.Machines.NavigationVFX.FixNav;
+
+            NavConnection = FixNav:GetPropertyChangedSignal("Enabled"):Connect(function()
+                if (not AutoFixNavEnabled) then return; end
+                if (FixNav.Enabled) then
+                    task.wait(1);
+                    ReplicatedStorage:WaitForChild("FixNav"):FireServer();
+                end
+            end);
+        end);
+    end
+});
+
+local AutoTurnEngineEnabled: boolean = false;
+local Connections: {RBXScriptConnection} = {};
+
+MainTab:AddToggle({
+    Name = "auto turn engine button (fixbirdstrike)",
+    Default = false,
+    Callback = function(Value: boolean)
+        AutoTurnEngineEnabled = Value;
+
+        for _, Connection in ipairs(Connections) do Connection:Disconnect(); end
+        Connections = {};
+        if (not Value) then return; end
+
+        task.spawn(function()
+            local Plane = Workspace:FindFirstChild("Plane");
+            if (not Plane) then
+                AutoTurnEngineEnabled = false;
+                return;
+            end
+
+            local Ok, Err = pcall(function()
+                local Console = Plane.Machines.CenterConsole;
+                local LeftButton = Console.LeftButton;
+                local RightButton = Console.RightButton;
+                local LeftDetector = LeftButton.ClickDetector;
+                local RightDetector = RightButton.ClickDetector;
+
+                table.insert(Connections, LeftButton:GetPropertyChangedSignal("Material"):Connect(function()
+                    if (AutoTurnEngineEnabled and LeftButton.Material ~= Enum.Material.Neon) then
+                        fireclickdetector(LeftDetector);
+                    end
+                end));
+
+                table.insert(Connections, RightButton:GetPropertyChangedSignal("Material"):Connect(function()
+                    if (AutoTurnEngineEnabled and RightButton.Material ~= Enum.Material.Neon) then
+                        fireclickdetector(RightDetector);
+                    end
+                end));
+
+                local ConditionFrame = Plane.Machines.EngineConditionMachine.Screen2.SurfaceGui.Frame;
+                table.insert(Connections, ConditionFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+                    if (not AutoTurnEngineEnabled) then return; end
+                    if (ConditionFrame.Visible) then
+                        fireclickdetector(RightDetector);
+                        task.wait(0.2);
+                        fireclickdetector(LeftDetector);
+                        Interface:Notify("Birdstrike", "engines off");
+                    end
+                end));
+            end);
+
+            if (not Ok) then
+                AutoTurnEngineEnabled = false;
+            else
+                Interface:Notify("Active", "auto turn engine button on");
+            end
+        end);
+    end
+});
+
+local SpamOxygenEnabled: boolean = false;
+MainTab:AddToggle({
+    Name = "spam oxygen",
+    Default = false,
+    Callback = function(Value: boolean)
+        SpamOxygenEnabled = Value;
+        if (Value) then
+            task.spawn(function()
+                local AirEvent: RemoteEvent? = Workspace:FindFirstChild("Values") and Workspace.Values:FindFirstChild("RepumpAirEvent");
+                if (not AirEvent) then
+                    SpamOxygenEnabled = false;
+                    return;
+                end
+                while (SpamOxygenEnabled) do
+                    pcall(function() AirEvent:FireServer(); end);
+                    task.wait(0.01);
+                end
+            end);
+        end
+    end
+});
+
 local SpamTempEnabled: boolean = false;
 MainTab:AddToggle({
     Name = "keep temp stable (22C)",
     Default = false,
     Callback = function(Value: boolean)
         SpamTempEnabled = Value;
-        if (Value) then 
+        if (Value) then
             task.spawn(function()
                 local TempEvent: RemoteEvent? = ReplicatedStorage:FindFirstChild("ACTempChange");
-                if (not TempEvent) then 
-                    Interface:Notify("Error", "event not found"); 
-                    SpamTempEnabled = false; 
-                    return; 
+                if (not TempEvent) then
+                    SpamTempEnabled = false;
+                    return;
                 end
-                while (SpamTempEnabled) do 
+                while (SpamTempEnabled) do
                     pcall(function()
                         local Plane = Workspace:FindFirstChild("Plane");
                         if (not Plane) then return; end
                         local Label: TextLabel? = Plane:FindFirstChild("Machines") and Plane.Machines:FindFirstChild("AirConditionner") and Plane.Machines.AirConditionner:FindFirstChild("Screen") and Plane.Machines.AirConditionner.Screen:FindFirstChild("SurfaceGui") and Plane.Machines.AirConditionner.Screen.SurfaceGui:FindFirstChild("Frame") and Plane.Machines.AirConditionner.Screen.SurfaceGui.Frame:FindFirstChild("TemperatureLabel");
                         if (not Label) then return; end
-                        local CurrentTemp: number? = tonumber(Label.Text:match("%d+"));
+                        local CurrentTemp: number? = tonumber(Label.Text:match("-?%d+"));
                         if (not CurrentTemp) then return; end
-                        if (CurrentTemp < 22) then 
-                            TempEvent:FireServer(true); 
-                        elseif (CurrentTemp > 22) then 
-                            TempEvent:FireServer(false); 
+                        if (CurrentTemp < 22) then
+                            TempEvent:FireServer(true);
+                        elseif (CurrentTemp > 22) then
+                            TempEvent:FireServer(false);
                         end
-                    end); 
-                    task.wait(0.1); 
+                    end);
+                    task.wait(0.1);
                 end
-            end); 
-        end
-    end
-});
-
-local AutoBirdEnabled: boolean = false;
-local BirdConnection: RBXScriptConnection? = nil;
-MainTab:AddToggle({
-    Name = "auto birdstrike fix (fast)",
-    Default = false,
-    Callback = function(Value: boolean)
-        AutoBirdEnabled = Value;
-        if (BirdConnection) then 
-            BirdConnection:Disconnect(); 
-            BirdConnection = nil; 
-        end
-        if (Value) then
-            local Success: boolean, ErrorMessage: string? = pcall(function()
-                local Plane = Workspace:FindFirstChild("Plane");
-                local ConditionFrame: Frame = Plane.Machines.EngineConditionMachine.Screen2.SurfaceGui.Frame;
-                local RightBtnDetector: ClickDetector = Plane.Machines.CenterConsole.RightButton.ClickDetector;
-                local LeftBtnDetector: ClickDetector = Plane.Machines.CenterConsole.LeftButton.ClickDetector;
-                
-                BirdConnection = ConditionFrame:GetPropertyChangedSignal("Visible"):Connect(function()
-                    if (not AutoBirdEnabled) then return; end
-                    if (ConditionFrame.Visible) then
-                        fireclickdetector(RightBtnDetector); 
-                        task.wait(0.05); 
-                        fireclickdetector(LeftBtnDetector);
-                        Interface:Notify("birdstrike", "engines off");
-                    end
-                end);
             end);
-            if (not Success and ErrorMessage) then Interface:Notify("Error", "birdstrike UI missing (Lobby?)"); end
         end
     end
 });
@@ -238,9 +289,9 @@ MainTab:AddToggle({
     Default = false,
     Callback = function(Value: boolean)
         AutoSteerEnabled = Value;
-        if (SteerConnection) then 
-            SteerConnection:Disconnect(); 
-            SteerConnection = nil; 
+        if (SteerConnection) then
+            SteerConnection:Disconnect();
+            SteerConnection = nil;
         end
         if (Value) then
             pcall(function()
@@ -265,7 +316,7 @@ MainTab:AddToggle({
     Default = false,
     Callback = function(Value: boolean)
         AutoRefuelEnabled = Value;
-        if (Value) then 
+        if (Value) then
             task.spawn(function()
                 while (AutoRefuelEnabled) do
                     local Success: boolean, GasLevel: number? = pcall(function()
@@ -275,7 +326,7 @@ MainTab:AddToggle({
                         local RootPart: BasePart? = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart");
                         local OriginalCFrame: CFrame? = RootPart and RootPart.CFrame;
                         local JerryCan: Tool? = LocalPlayer.Backpack:FindFirstChild("JerryCan");
-                        
+
                         if (JerryCan) then
                             JerryCan.Parent = LocalPlayer.Character;
                         else
@@ -288,11 +339,11 @@ MainTab:AddToggle({
                             end
                             continue;
                         end
-                        
-                        task.wait(0.1); 
+
+                        task.wait(0.1);
                         CharController:PerformRefuel();
                         Interface:Notify("Done", "auto refueled");
-                        
+
                         if (OriginalCFrame) then
                             local UpdatedRoot: BasePart? = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart");
                             if (UpdatedRoot) then UpdatedRoot.CFrame = OriginalCFrame; end
@@ -300,7 +351,7 @@ MainTab:AddToggle({
                     end
                     task.wait(1);
                 end
-            end); 
+            end);
         end
     end
 });
@@ -311,10 +362,10 @@ MainTab:AddButton({
     Name = "fix lights",
     Callback = function()
         local LightEvent: RemoteEvent = LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("FixLightMinigame"):WaitForChild("Frame"):WaitForChild("CablesFrame"):WaitForChild("FixLight");
-        for Index = 1, 5 do 
-            LightEvent:FireServer("Light" .. Index); 
+        for Index = 1, 5 do
+            LightEvent:FireServer("Light" .. Index);
         end
-        LightEvent:FireServer("LightPilot"); 
+        LightEvent:FireServer("LightPilot");
         Interface:Notify("Done", "lights fixed");
     end
 });
@@ -322,8 +373,8 @@ MainTab:AddButton({
 MainTab:AddButton({
     Name = "fix fires",
     Callback = function()
-        for Index = 1, 160 do 
-            pcall(function() ReplicatedStorage:WaitForChild("FixFire"):FireServer("Fire" .. Index); end); 
+        for Index = 1, 160 do
+            pcall(function() ReplicatedStorage:WaitForChild("FixFire"):FireServer("Fire" .. Index); end);
         end
         Interface:Notify("Done", "fires extinguished");
     end
@@ -333,36 +384,36 @@ MainTab:AddButton({
     Name = "fix holes (need tape)",
     Callback = function()
         local HoleRemote: RemoteEvent | RemoteFunction = ReplicatedStorage:FindFirstChild("HoleFix") or ReplicatedStorage:FindFirstChild("FixHole");
-        if (not HoleRemote) then Interface:Notify("Error", "remote not found"); return; end
-        
+        if (not HoleRemote) then return; end
+
         local TapeItem: Tool? = LocalPlayer.Backpack:FindFirstChild("Tape") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Tape"));
-        if (TapeItem) then 
-            TapeItem.Parent = LocalPlayer.Character; 
-            task.wait(0.15); 
+        if (TapeItem) then
+            TapeItem.Parent = LocalPlayer.Character;
+            task.wait(0.15);
         end
-        
+
         local IsEvent: boolean = HoleRemote:IsA("RemoteEvent");
-        for Index = 1, 160 do 
-            task.spawn(function() 
+        for Index = 1, 160 do
+            task.spawn(function()
                 pcall(function()
-                    if (IsEvent) then 
-                        HoleRemote:FireServer("Hole" .. Index); 
-                    else 
-                        HoleRemote:InvokeServer("Hole" .. Index); 
+                    if (IsEvent) then
+                        HoleRemote:FireServer("Hole" .. Index);
+                    else
+                        HoleRemote:InvokeServer("Hole" .. Index);
                     end
-                end); 
-            end); 
+                end);
+            end);
         end
         Interface:Notify("Done", "holes patched");
     end
 });
 
-MainTab:AddButton({ 
-    Name = "fix nav", 
+MainTab:AddButton({
+    Name = "fix nav",
     Callback = function()
-        ReplicatedStorage:WaitForChild("FixNav"):FireServer(); 
+        ReplicatedStorage:WaitForChild("FixNav"):FireServer();
         Interface:Notify("Done", "nav fixed");
-    end 
+    end
 });
 
 MainTab:AddButton({
@@ -370,7 +421,7 @@ MainTab:AddButton({
     Callback = function()
         task.spawn(function()
             local EngineRemote: RemoteEvent? = ReplicatedStorage:FindFirstChild("EngineFixEvents") and ReplicatedStorage.EngineFixEvents:FindFirstChild("FixEngineMinigame");
-            if (not EngineRemote) then Interface:Notify("Error", "FixEngineMinigame remote not found"); return; end
+            if (not EngineRemote) then return; end
             pcall(function() EngineRemote:FireServer(true); end);
             pcall(function() EngineRemote:FireServer(false); end);
             Interface:Notify("Done", "engines fixed");
@@ -381,24 +432,22 @@ MainTab:AddButton({
 MainTab:AddButton({
     Name = "fix windows",
     Callback = function()
-        for Index = 1, 20 do 
-            pcall(function() ReplicatedStorage:WaitForChild("WindowMinigame"):FireServer("Window" .. Index, false); end); 
+        for Index = 1, 20 do
+            pcall(function() ReplicatedStorage:WaitForChild("WindowMinigame"):FireServer("Window" .. Index, false); end);
         end
         Interface:Notify("Done", "windows repaired");
     end
 });
 
-MainTab:AddButton({ 
-    Name = "send flares", 
+MainTab:AddButton({
+    Name = "send flares",
     Callback = function()
         local FlareEvent: RemoteEvent? = ReplicatedStorage:FindFirstChild("SteeringFlares");
-        if (FlareEvent) then 
-            FlareEvent:FireServer(); 
-            Interface:Notify("Done", "flares sent"); 
-        else 
-            Interface:Notify("Error", "not found"); 
+        if (FlareEvent) then
+            FlareEvent:FireServer();
+            Interface:Notify("Done", "flares sent");
         end
-    end 
+    end
 });
 
 MainTab:AddButton({
@@ -427,25 +476,23 @@ MainTab:AddButton({
             end
         end
         for _, Object: Instance in ipairs(Workspace:GetDescendants()) do ApplyHook(Object); end
-        Workspace.DescendantAdded:Connect(ApplyHook); 
+        Workspace.DescendantAdded:Connect(ApplyHook);
         game.DescendantAdded:Connect(ApplyHook);
         Interface:Notify("Done", "instant interact enabled");
     end
 });
 
 local function CreateTeleportButton(Tab: any, ButtonName: string, PartFinder: () -> BasePart?): nil
-    Tab:AddButton({ 
-        Name = ButtonName, 
-        Callback = function() 
-            pcall(function() 
+    Tab:AddButton({
+        Name = ButtonName,
+        Callback = function()
+            pcall(function()
                 local TargetPart: BasePart? = PartFinder();
                 if (TargetPart) then
-                    CharController:TeleportToPart(TargetPart); 
-                else
-                    Interface:Notify("Error", "Location not found (are you in the lobby?)");
+                    CharController:TeleportToPart(TargetPart);
                 end
-            end); 
-        end 
+            end);
+        end
     });
     return nil;
 end
@@ -455,25 +502,24 @@ CreateTeleportButton(TeleportsTab, "pilot seat", function() return Workspace:Fin
 CreateTeleportButton(TeleportsTab, "mid plane", function() return Workspace:FindFirstChild("Plane") and Workspace.Plane:FindFirstChild("Fuselage"); end);
 CreateTeleportButton(TeleportsTab, "mop (plane tools)", function() return Workspace:FindFirstChild("Plane") and Workspace.Plane:FindFirstChild("Tools") and Workspace.Plane.Tools:FindFirstChild("Mop"); end);
 
-TeleportsTab:AddButton({ 
-    Name = "generator", 
+TeleportsTab:AddButton({
+    Name = "generator",
     Callback = function()
         local TempPart: Part = Instance.new("Part");
-        TempPart.CanCollide = false; 
-        TempPart.Transparency = 1; 
+        TempPart.CanCollide = false;
+        TempPart.Transparency = 1;
         TempPart.Anchored = true;
         TempPart.CFrame = CFrame.new(0.628192008, 18.8988991, -86.9489975);
         TempPart.Parent = Workspace;
-        CharController:TeleportToPart(TempPart); 
-        task.wait(0.5); 
+        CharController:TeleportToPart(TempPart);
+        task.wait(0.5);
         TempPart:Destroy();
-    end 
+    end
 });
 
 for Index = 1, 3 do
     CreateTeleportButton(TeleportsTab, "jet position " .. Index, function() return Workspace:FindFirstChild("JetPosition" .. Index) :: BasePart?; end);
 end
-
 
 type ClassData = { Name: string, Id: string };
 local ClassList: {ClassData} = {
@@ -499,43 +545,43 @@ local ClassList: {ClassData} = {
 };
 
 for _, ClassInfo: ClassData in ipairs(ClassList) do
-    ClassesTab:AddButton({ 
-        Name = ClassInfo.Name, 
+    ClassesTab:AddButton({
+        Name = ClassInfo.Name,
         Callback = function()
             pcall(function() ReplicatedStorage.GameEvent:FireServer("Equip", ClassInfo.Id); end);
             pcall(function() ReplicatedStorage.GameEvent:FireServer("BuyClass", ClassInfo.Id); end);
-            pcall(function() 
+            pcall(function()
                 local MainEvent: RemoteEvent = LocalPlayer.PlayerGui.Classes.Frame.MainClassEvent;
                 MainEvent:FireServer("Buy", 0, ClassInfo.Id == "ExperiencedTechnician" and "Technician" or ClassInfo.Id);
                 MainEvent:FireServer("Equip", 0, ClassInfo.Id);
             end);
             Interface:Notify("Class", "equipping " .. ClassInfo.Name);
-        end 
+        end
     });
 end
 
-MiscTab:AddButton({ 
-    Name = "give 10K points", 
+MiscTab:AddButton({
+    Name = "give 10K points",
     Callback = function()
         pcall(function() LocalPlayer.PlayerGui.Shop.ShopFrame.BuyItem:FireServer("Mop", -10000); end);
         Interface:Notify("Done", "10k points given");
-    end 
+    end
 });
 
-MiscTab:AddButton({ 
-    Name = "give 50K points", 
+MiscTab:AddButton({
+    Name = "give 50K points",
     Callback = function()
         pcall(function() LocalPlayer.PlayerGui.Shop.ShopFrame.BuyItem:FireServer("Mop", -50000); end);
         Interface:Notify("Done", "50k points given");
-    end 
+    end
 });
 
-MiscTab:AddButton({ 
-    Name = "refuel (manual)", 
+MiscTab:AddButton({
+    Name = "refuel (manual)",
     Callback = function()
         CharController:PerformRefuel();
         Interface:Notify("Done", "refueled");
-    end 
+    end
 });
 
 Interface:Notify("Loaded", "Successfully loaded rustware v7.0");
